@@ -6,6 +6,9 @@ class Trainer:
 
     def __init__(self, model, args):
         self.model = model
+        if args.eval:
+            state_dict = torch.load(args.eval)
+            self.load_state_dict(state_dict)
         self.criterion = nn.CrossEntropyLoss()
         self._clip_norm = args.clip_norm
         self.params = filter(lambda p: p.requires_grad, model.parameters())
@@ -39,3 +42,7 @@ class Trainer:
         outputs = self.model(inputs)
         loss = self.criterion(outputs, targets)
         return outputs, loss
+
+    def predict(self, inputs):
+        outputs = self.model(inputs)
+        return outputs

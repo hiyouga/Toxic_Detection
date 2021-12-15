@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import time
 import torch
@@ -12,6 +13,7 @@ from trainer import Trainer
 from data_utils import load_data
 from models import textcnn
 from evaluation import evaluate
+import torch.nn.functional as F
 
 
 class Instructor:
@@ -43,6 +45,7 @@ class Instructor:
             best_record['val_acc'] = val_acc
             best_record['val_loss'] = val_loss
             best_record['model_state'] = self.trainer.save_state_dict()
+            torch.save(self.trainer.save_state_dict(), os.path.join('state_dict', f"{self.args.timestamp}.pt"))
         return best_record
 
     def _train(self, dataloader):
@@ -73,7 +76,7 @@ class Instructor:
                 outputs, loss = self.trainer.evaluate(inputs, targets)
                 val_loss += loss.item() * targets.size(0)
                 n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
-                all_pred += list(outputs[:, 1].cpu())
+                all_pred += list(F.softmax(outputs, dim=-1)[:, 1].cpu())
                 n_val += targets.size(0)
                 if not self.args.no_bar:
                     ratio = int((i_batch+1)*50/n_batch) # process bar
@@ -96,8 +99,24 @@ class Instructor:
                              f"bias_auc: {bias_auc*100:.2f}, score: {final_score*100:.2f}")
         if best_record['model_state'] is not None:
             self.trainer.load_state_dict(best_record['model_state'])
-        torch.save(self.trainer.save_state_dict(), os.path.join('state_dict', f"{self.args.timestamp}.pt"))
         self.logger.info(f"model saved: {self.args.timestamp}.pt")
+
+    @torch.no_grad()
+    def test(self):
+        fname = 'test.json'
+        fdata = json.load(open(os.path.join('data', fname), 'r', encoding='utf-8'))
+        self.trainer.eval_mode()
+        ans = []
+        for data in fdata:
+            text = self.tokenizer.to_sequence(data['text'])
+            text = torch.tensor([text], device=self.args.device)
+            id = data['id']
+            output = F.softmax(self.trainer.predict(text), dim=-1)[:, 1]
+            ans.append((id, output.item()))
+        with open('output.txt', 'w') as f:
+            for item in ans:
+                print(f'{item[0]} {item[1]:.6f}', file=f)
+
 
 
 if __name__ == '__main__':
@@ -118,6 +137,7 @@ if __name__ == '__main__':
     parser.add_argument('--timestamp', type=str, default=None, help='Experiment timestamp.')
     parser.add_argument('--no_bar', default=False, action='store_true', help='Disable process bar.')
     parser.add_argument('--no_backend', default=False, action='store_true', help='Use frontend matplotlib.')
+    parser.add_argument('--eval', type=str, default=None, help='The path for saved model state dict.')
     args = parser.parse_args()
     args.model_class = model_classes[args.model_name]
     args.log_name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')[2:]}.log"
@@ -135,4 +155,7 @@ if __name__ == '__main__':
             os.mkdir(dir_name)
     warnings.simplefilter("ignore")
     ins = Instructor(args)
-    ins.run()
+    if args.eval:
+        ins.test()
+    else:
+        ins.run()

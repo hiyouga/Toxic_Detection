@@ -49,7 +49,7 @@ if __name__ == '__main__':
     testset = list()
     for i in range(len(test_df)):
         row = test_df.loc[i]
-        testset.append({'text': row['comment_text']})
+        testset.append({'id': str(row['id']),'text': row['comment_text']})
     with open('test.json', 'w', encoding='utf-8') as f:
         f.write(json.dumps(testset, sort_keys=False, indent=4))
         print(f"Processed {len(testset)} test examples")
