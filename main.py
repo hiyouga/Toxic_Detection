@@ -11,6 +11,7 @@ import numpy as np
 from trainer import Trainer
 from data_utils import load_data
 from models import textcnn
+from evaluation import evaluate
 
 
 class Instructor:
@@ -66,28 +67,33 @@ class Instructor:
         n_batch = len(dataloader)
         self.trainer.eval_mode()
         with torch.no_grad():
+            all_pred = []
             for i_batch, sample_batched in enumerate(dataloader):
                 inputs, targets = sample_batched['text'].to(self.args.device), sample_batched['target'].to(self.args.device)
                 outputs, loss = self.trainer.evaluate(inputs, targets)
                 val_loss += loss.item() * targets.size(0)
                 n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
+                all_pred += list(outputs[:, 1].cpu())
                 n_val += targets.size(0)
                 if not self.args.no_bar:
                     ratio = int((i_batch+1)*50/n_batch) # process bar
                     print(f"[{'>'*ratio}{' '*(50-ratio)}] {i_batch+1}/{n_batch} {(i_batch+1)*100/n_batch:.2f}%", end='\r')
+            '''bias auc may be nan when a subgroup is empty.'''
+            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
         if not self.args.no_bar:
             print()
-        return val_loss / n_val, n_correct / n_val
+        return val_loss / n_val, n_correct / n_val, overall_auc, bias_auc, final_score
 
     def run(self):
         best_record = {'epoch': 0, 'val_loss': 0, 'val_acc': 0, 'model_state': None}
         for epoch in range(self.args.num_epoch):
             train_loss, train_acc = self._train(self.train_dataloader)
-            val_loss, val_acc = self._validate(self.dev_dataloader)
+            val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader)
             best_record = self._update_record(epoch+1, val_loss, val_acc, best_record)
             self.logger.info(f"{epoch+1}/{self.args.num_epoch} - {100*(epoch+1)/self.args.num_epoch:.2f}%")
             self.logger.info(f"[train] loss: {train_loss:.4f}, acc: {train_acc*100:.2f}")
-            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc*100:.2f}")
+            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc*100:.2f}, auc: {overall_auc*100:.2f}, "
+                             f"bias_auc: {bias_auc*100:.2f}, score: {final_score*100:.2f}")
         if best_record['model_state'] is not None:
             self.trainer.load_state_dict(best_record['model_state'])
         torch.save(self.trainer.save_state_dict(), os.path.join('state_dict', f"{self.args.timestamp}.pt"))
