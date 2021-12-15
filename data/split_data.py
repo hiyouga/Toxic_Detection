@@ -1,5 +1,6 @@
 import json
 import random
+import numpy as np
 import pandas as pd
 
 
@@ -33,7 +34,7 @@ if __name__ == '__main__':
         else:
             length_dict[length] = 1
         for attr in attrs:
-            data[attr] = extra_row[attr] if not extra_row[attr] else -1
+            data[attr] = extra_row[attr] if not np.isnan(extra_row[attr]) else -1
         # data['identity_annotator_count'] = int(extra_row['identity_annotator_count'])
         dataset.append(data)
     random.shuffle(dataset)
