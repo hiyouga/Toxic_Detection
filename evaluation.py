@@ -1,15 +1,16 @@
 import pandas as pd
 from sklearn import metrics
 import numpy as np
-import json, os
+import os
 
 
 identity_columns = [
     'male', 'female', 'homosexual_gay_or_lesbian', 'christian', 'jewish',
-    'muslim', 'black', 'white', 'psychiatric_or_mental_illness']
+    'muslim', 'black', 'white', 'psychiatric_or_mental_illness'
+]
 SUBGROUP_AUC = 'subgroup_auc'
-BPSN_AUC = 'bpsn_auc'  # stands for background positive, subgroup negative
-BNSP_AUC = 'bnsp_auc'  # stands for background negative, subgroup positive
+BPSN_AUC = 'bpsn_auc' # stands for background positive, subgroup negative
+BNSP_AUC = 'bnsp_auc' # stands for background negative, subgroup positive
 TOXICITY_COLUMN = 'target'
 
 
@@ -26,7 +27,7 @@ def compute_subgroup_auc(df, subgroup, label, model_name):
 
 
 def compute_bpsn_auc(df, subgroup, label, model_name):
-    """Computes the AUC of the within-subgroup negative examples and the background positive examples."""
+    """ Computes the AUC of the within-subgroup negative examples and the background positive examples """
     subgroup_negative_examples = df[df[subgroup] & ~df[label]]
     non_subgroup_positive_examples = df[~df[subgroup] & df[label]]
     examples = subgroup_negative_examples.append(non_subgroup_positive_examples)
@@ -34,7 +35,7 @@ def compute_bpsn_auc(df, subgroup, label, model_name):
 
 
 def compute_bnsp_auc(df, subgroup, label, model_name):
-    """Computes the AUC of the within-subgroup positive examples and the background negative examples."""
+    """ Computes the AUC of the within-subgroup positive examples and the background negative examples """
     subgroup_positive_examples = df[df[subgroup] & df[label]]
     non_subgroup_negative_examples = df[~df[subgroup] & ~df[label]]
     examples = subgroup_positive_examples.append(non_subgroup_negative_examples)
@@ -91,11 +92,7 @@ def evaluate(y_pred):
     df = read_json('dev.json')
     model_name = 'pred'
     df[model_name] = y_pred
-    bias_metrics_df = compute_bias_metrics_for_model(df,
-                                                     identity_columns,
-                                                     model_name,
-                                                     TOXICITY_COLUMN)
+    bias_metrics_df = compute_bias_metrics_for_model(df, identity_columns, model_name, TOXICITY_COLUMN)
     overall_auc = calculate_overall_auc(df, model_name)
     Bias_AUC, final_score = get_final_metric(bias_metrics_df, overall_auc)
     return overall_auc, Bias_AUC, final_score
-

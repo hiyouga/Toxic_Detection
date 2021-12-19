@@ -6,13 +6,14 @@ class Trainer:
 
     def __init__(self, model, args):
         self.model = model
-        if args.eval:
-            state_dict = torch.load(args.eval)
-            self.load_state_dict(state_dict)
         self.criterion = nn.CrossEntropyLoss()
         self._clip_norm = args.clip_norm
         self.params = filter(lambda p: p.requires_grad, model.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=args.lr, weight_decay=args.decay)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, args.num_epoch)
+
+    def lr_scheduler_step(self):
+        self.scheduler.step()
 
     def to(self, device):
         self.model.to(device)

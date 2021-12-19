@@ -101,7 +101,10 @@ class ToxicDataset(Dataset):
             fdata = json.load(open(os.path.join('data', fname), 'r', encoding='utf-8'))
             for data in fdata:
                 data['text'] = tokenizer.to_sequence(data['text'])
-                data['target'] = 0 if data['target'] < 0.5 else 1
+                if split == 'test':
+                    data['target'] = 0
+                else:
+                    data['target'] = 0 if data['target'] < 0.5 else 1
                 dataset.append(data)
             pickle.dump(dataset, open(cache_file, 'wb'))
         self._dataset = dataset
@@ -163,6 +166,8 @@ def load_data(batch_size):
     embedding_matrix = build_embedding_matrix(tokenizer.vocab)
     trainset = ToxicDataset('train.json', tokenizer, split='train')
     devset = ToxicDataset('dev.json', tokenizer, split='dev')
+    testset = ToxicDataset('test.json', tokenizer, split='test')
     train_dataloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, pin_memory=True)
     dev_dataloader = DataLoader(devset, batch_size=batch_size, shuffle=False, pin_memory=True)
-    return train_dataloader, dev_dataloader, tokenizer, embedding_matrix
+    test_dataloader = DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True)
+    return train_dataloader, dev_dataloader, test_dataloader, tokenizer, embedding_matrix

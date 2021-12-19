@@ -21,10 +21,11 @@ if __name__ == '__main__':
         'psychiatric_or_mental_illness'
     ]
     dataset = list()
-    for i in range(10000):
+    for i in range(20000):
         row = train_df.loc[i]
         extra_row = extra_df.loc[i]
         data = {
+            'id': int(row['id']),
             'text': row['comment_text'],
             'target': row['target']
         }
@@ -49,7 +50,7 @@ if __name__ == '__main__':
     testset = list()
     for i in range(len(test_df)):
         row = test_df.loc[i]
-        testset.append({'id': str(row['id']),'text': row['comment_text']})
+        testset.append({'id': int(row['id']), 'text': row['comment_text']})
     with open('test.json', 'w', encoding='utf-8') as f:
         f.write(json.dumps(testset, sort_keys=False, indent=4))
         print(f"Processed {len(testset)} test examples")

@@ -1,5 +1,4 @@
 import os
-import json
 import sys
 import time
 import torch
@@ -11,9 +10,8 @@ import datetime
 import numpy as np
 from trainer import Trainer
 from data_utils import load_data
-from models import textcnn
+from models import textcnn, textrnn, restext
 from evaluation import evaluate
-import torch.nn.functional as F
 
 
 class Instructor:
@@ -26,7 +24,7 @@ class Instructor:
         self.logger.addHandler(logging.FileHandler(os.path.join('logs', args.log_name)))
         self._print_args()
         dataloaders = load_data(batch_size=self.args.batch_size)
-        self.train_dataloader, self.dev_dataloader, self.tokenizer, embedding_matrix = dataloaders
+        self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
         configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix}
         self.logger.info('=> creating model')
         self.trainer = Trainer(self.args.model_class(configs), self.args)
@@ -39,11 +37,10 @@ class Instructor:
         for arg in vars(self.args):
             print(f">>> {arg}: {getattr(self.args, arg)}")
 
-    def _update_record(self, epoch, val_loss, val_acc, best_record):
-        if (val_acc > best_record['val_acc']) or (val_acc == best_record['val_acc'] and val_loss < best_record['val_loss']):
+    def _update_record(self, epoch, overall_auc, best_record):
+        if overall_auc > best_record['overall_auc']:
             best_record['epoch'] = epoch
-            best_record['val_acc'] = val_acc
-            best_record['val_loss'] = val_loss
+            best_record['overall_auc'] = overall_auc
             best_record['model_state'] = self.trainer.save_state_dict()
             torch.save(self.trainer.save_state_dict(), os.path.join('state_dict', f"{self.args.timestamp}.pt"))
         return best_record
@@ -65,8 +62,9 @@ class Instructor:
             print()
         return train_loss / n_train, n_correct / n_train
 
-    def _validate(self, dataloader):
+    def _validate(self, dataloader, inference=False):
         val_loss, n_correct, n_val = 0, 0, 0
+        all_cid, all_pred = list(), list()
         n_batch = len(dataloader)
         self.trainer.eval_mode()
         with torch.no_grad():
@@ -76,59 +74,52 @@ class Instructor:
                 outputs, loss = self.trainer.evaluate(inputs, targets)
                 val_loss += loss.item() * targets.size(0)
                 n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
-                all_pred += list(F.softmax(outputs, dim=-1)[:, 1].cpu())
+                all_cid.extend(sample_batched['id'])
+                all_pred.extend([pred.item() for pred in torch.argmax(outputs, -1)])
                 n_val += targets.size(0)
                 if not self.args.no_bar:
                     ratio = int((i_batch+1)*50/n_batch) # process bar
                     print(f"[{'>'*ratio}{' '*(50-ratio)}] {i_batch+1}/{n_batch} {(i_batch+1)*100/n_batch:.2f}%", end='\r')
-            '''bias auc may be nan when a subgroup is empty.'''
-            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
         if not self.args.no_bar:
             print()
-        return val_loss / n_val, n_correct / n_val, overall_auc, bias_auc, final_score
+        if inference:
+            return all_cid, all_pred
+        else:
+            ''' bias auc may be nan when a subgroup is empty '''
+            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
+            return val_loss / n_val, n_correct / n_val, overall_auc, bias_auc, final_score
 
     def run(self):
-        best_record = {'epoch': 0, 'val_loss': 0, 'val_acc': 0, 'model_state': None}
+        best_record = {'epoch': 0, 'overall_auc': 0, 'model_state': None}
         for epoch in range(self.args.num_epoch):
             train_loss, train_acc = self._train(self.train_dataloader)
             val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader)
-            best_record = self._update_record(epoch+1, val_loss, val_acc, best_record)
+            self.trainer.lr_scheduler_step()
+            best_record = self._update_record(epoch+1, overall_auc, best_record)
             self.logger.info(f"{epoch+1}/{self.args.num_epoch} - {100*(epoch+1)/self.args.num_epoch:.2f}%")
             self.logger.info(f"[train] loss: {train_loss:.4f}, acc: {train_acc*100:.2f}")
-            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc*100:.2f}, auc: {overall_auc*100:.2f}, "
-                             f"bias_auc: {bias_auc*100:.2f}, score: {final_score*100:.2f}")
+            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc*100:.2f}")
+            self.logger.info(f"[val] auc: {overall_auc*100:.2f}, bias_auc: {bias_auc*100:.2f}, score: {final_score*100:.2f}")
+        self.logger.info(f"best overall auc: {best_record['overall_auc']*100:.2f}")
         if best_record['model_state'] is not None:
             self.trainer.load_state_dict(best_record['model_state'])
         self.logger.info(f"model saved: {self.args.timestamp}.pt")
-
-    @torch.no_grad()
-    def test(self):
-        fname = 'test.json'
-        fdata = json.load(open(os.path.join('data', fname), 'r', encoding='utf-8'))
-        self.trainer.eval_mode()
-        ans = []
-        for data in fdata:
-            text = self.tokenizer.to_sequence(data['text'])
-            text = torch.tensor([text], device=self.args.device)
-            id = data['id']
-            output = F.softmax(self.trainer.predict(text), dim=-1)[:, 1]
-            ans.append((id, output.item()))
-        with open('output.txt', 'w') as f:
-            for item in ans:
-                print(f'{item[0]} {item[1]:.6f}', file=f)
-
+        all_cid, all_pred = self._validate(self.test_dataloader, inference=True)
+        with open(f"{self.args.model_name}_{best_record['overall_auc']*100:.2f}.txt", 'w', encoding='utf-8') as f:
+            f.write('\n'.join([f"{cid} {pred}" for cid, pred in zip(all_cid, all_pred)]))
+        self.logger.info(f"submission result saved: {self.args.model_name}_{best_record['overall_auc']*100:.2f}.txt")
 
 
 if __name__ == '__main__':
 
-    model_classes = {'textcnn': textcnn}
+    model_classes = {'textcnn': textcnn, 'textrnn': textrnn, 'restext': restext}
     parser = argparse.ArgumentParser(description='Trainer', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ''' model '''
     parser.add_argument('--model_name', type=str, default='textcnn', choices=model_classes.keys(), help='Classifier model architecture.')
     ''' optimization '''
-    parser.add_argument('--num_epoch', type=int, default=20, help='Number of epochs to train.')
+    parser.add_argument('--num_epoch', type=int, default=50, help='Number of epochs to train.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size.')
-    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate.')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
     parser.add_argument('--decay', type=float, default=1e-5, help='Weight decay (L2 penalty).')
     parser.add_argument('--clip_norm', type=int, default=20, help='Maximum norm of gradients.')
     ''' environment '''
@@ -137,10 +128,9 @@ if __name__ == '__main__':
     parser.add_argument('--timestamp', type=str, default=None, help='Experiment timestamp.')
     parser.add_argument('--no_bar', default=False, action='store_true', help='Disable process bar.')
     parser.add_argument('--no_backend', default=False, action='store_true', help='Use frontend matplotlib.')
-    parser.add_argument('--eval', type=str, default=None, help='The path for saved model state dict.')
     args = parser.parse_args()
     args.model_class = model_classes[args.model_name]
-    args.log_name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')[2:]}.log"
+    args.log_name = f"{args.model_name}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')[2:]}.log"
     args.timestamp = args.timestamp if args.timestamp else str(int(time.time())) + format(random.randint(0, 999), '03')
     args.seed = args.seed if args.seed else random.randint(0, 2**32-1)
     args.device = torch.device(args.device) if args.device else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -155,7 +145,4 @@ if __name__ == '__main__':
             os.mkdir(dir_name)
     warnings.simplefilter("ignore")
     ins = Instructor(args)
-    if args.eval:
-        ins.test()
-    else:
-        ins.run()
+    ins.run()
