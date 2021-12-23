@@ -23,9 +23,9 @@ class Instructor:
         self.logger.addHandler(logging.StreamHandler(sys.stdout))
         self.logger.addHandler(logging.FileHandler(os.path.join('logs', args.log_name)))
         self._print_args()
-        dataloaders = load_data(batch_size=args.batch_size)
+        dataloaders = load_data(batch_size=args.batch_size, bert_name=args.bert_name)
         self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
-        configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name}
+        configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
         self.logger.info('=> creating model')
         self.trainer = Trainer(args.model_class(configs), args)
         self.trainer.to(args.device)

@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from transformers import BertModel
 
@@ -11,8 +12,9 @@ class BERT(nn.Module):
         self.dense = nn.Linear(768, configs['num_classes'])
 
     def forward(self, text):
-        output, _ = self.bert(text)
-        cls_out = output[:, 0, :]
+        mask = torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
+        output = self.bert(input_ids=text, attention_mask=mask)
+        cls_out = output[0][:, 0, :]
         output = self.dense(self.dropout(cls_out))
         return output
 

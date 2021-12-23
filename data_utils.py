@@ -78,7 +78,7 @@ class Tokenizer:
 
     def to_sequence(self, text, reverse=False, padding='post', truncating='post'):
         if self.bert_tokenizer is not None:
-            sequence = self.bert_tokenizer.convert_tokens_to_ids(self.bert_tokenizer.tokenize(text))
+            sequence = [101] + self.bert_tokenizer.convert_tokens_to_ids(self.bert_tokenizer.tokenize(text))
         else:
             words = self.split_text(text.lower() if self.lower else text)
             sequence = [self.vocab.word_to_id(w) for w in words]
@@ -86,7 +86,8 @@ class Tokenizer:
             sequence = [0]
         if reverse:
             sequence.reverse()
-        return self.pad_sequence(sequence, pad_id=self.vocab.pad_id, maxlen=self.maxlen, padding=padding, truncating=truncating)
+        padding_id = self.vocab.pad_id if self.vocab else 0
+        return self.pad_sequence(sequence, pad_id=padding_id, maxlen=self.maxlen, padding=padding, truncating=truncating)
 
     @staticmethod
     def split_text(text):
