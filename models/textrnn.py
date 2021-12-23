@@ -20,7 +20,7 @@ class TextRNN(nn.Module):
     def forward(self, text):
         word_emb = self.dropout(self.embed_layer(text))
         text_len = torch.sum(text!=0, dim=-1)
-        rnn_output = self.rnn((word_emb, text_len.cpu()))
+        rnn_output, _ = self.rnn(word_emb, text_len.cpu())
         output = rnn_output.sum(dim=1).div(text_len.float().unsqueeze(-1))
         output = self.linear(self.dropout(output))
         return output

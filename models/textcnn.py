@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class TextCNN(nn.Module):
@@ -20,6 +19,7 @@ class TextCNN(nn.Module):
                 nn.ReLU(inplace=True),
             ) for K in KS
         ])
+        self.maxpool = nn.AdaptiveMaxPool1d(1)
         self.linear = nn.Linear(len(KS) * KN, C)
         self.dropout = nn.Dropout(0.1)
 
@@ -28,7 +28,7 @@ class TextCNN(nn.Module):
         maxpool_out = list()
         for conv in self.conv:
             cnn_out_i = conv(word_emb.transpose(1, 2))
-            maxpool_i = F.max_pool1d(cnn_out_i, cnn_out_i.size(-1)).squeeze(-1)
+            maxpool_i = self.maxpool(cnn_out_i).squeeze(-1)
             maxpool_out.append(maxpool_i)
         maxpool_out = torch.cat(maxpool_out, dim=-1)
         output = self.linear(self.dropout(maxpool_out))

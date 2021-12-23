@@ -56,6 +56,7 @@ class ResText(nn.Module):
         )
         self.layer1 = BasicBlock(KN, KN, dropout=0.1)
         self.layer2 = BasicBlock(KN, KN, dropout=0.1)
+        self.maxpool = nn.AdaptiveMaxPool1d(1)
         self.linear = nn.Linear(KN, C)
         self.dropout = nn.Dropout(0.1)
 
@@ -64,7 +65,7 @@ class ResText(nn.Module):
         out = self.conv1(out)
         out = self.layer1(out)
         out = self.layer2(out)
-        out = F.max_pool1d(out, out.size(-1)).squeeze(-1)
+        out = self.maxpool(out).squeeze(-1)
         out = self.linear(self.dropout(out))
         return out
 

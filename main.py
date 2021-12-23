@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 from trainer import Trainer
 from data_utils import load_data
-from models import textcnn, textrnn, restext
+from models import textcnn, textrnn, restext, bert
 from evaluation import evaluate
 
 
@@ -23,13 +23,13 @@ class Instructor:
         self.logger.addHandler(logging.StreamHandler(sys.stdout))
         self.logger.addHandler(logging.FileHandler(os.path.join('logs', args.log_name)))
         self._print_args()
-        dataloaders = load_data(batch_size=self.args.batch_size)
+        dataloaders = load_data(batch_size=args.batch_size)
         self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
-        configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix}
+        configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name}
         self.logger.info('=> creating model')
-        self.trainer = Trainer(self.args.model_class(configs), self.args)
-        self.trainer.to(self.args.device)
-        if self.args.device.type == 'cuda':
+        self.trainer = Trainer(args.model_class(configs), args)
+        self.trainer.to(args.device)
+        if args.device.type == 'cuda':
             self.logger.info(f"=> cuda memory allocated: {torch.cuda.memory_allocated(self.args.device.index)}")
 
     def _print_args(self):
@@ -105,17 +105,18 @@ class Instructor:
             self.trainer.load_state_dict(best_record['model_state'])
         self.logger.info(f"model saved: {self.args.timestamp}.pt")
         all_cid, all_pred = self._validate(self.test_dataloader, inference=True)
-        with open(f"{self.args.model_name}_{best_record['overall_auc']*100:.2f}.txt", 'w', encoding='utf-8') as f:
+        with open(f"{self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc']*100:.2f}.txt", 'w', encoding='utf-8') as f:
             f.write('\n'.join([f"{cid} {pred}" for cid, pred in zip(all_cid, all_pred)]))
-        self.logger.info(f"submission result saved: {self.args.model_name}_{best_record['overall_auc']*100:.2f}.txt")
+        self.logger.info(f"submission result saved: {self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc']*100:.2f}.txt")
 
 
 if __name__ == '__main__':
 
-    model_classes = {'textcnn': textcnn, 'textrnn': textrnn, 'restext': restext}
+    model_classes = {'textcnn': textcnn, 'textrnn': textrnn, 'restext': restext, 'bert': bert}
     parser = argparse.ArgumentParser(description='Trainer', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ''' model '''
     parser.add_argument('--model_name', type=str, default='textcnn', choices=model_classes.keys(), help='Classifier model architecture.')
+    parser.add_argument('--bert_name', type=str, default=None, help='Bert name.')
     ''' optimization '''
     parser.add_argument('--num_epoch', type=int, default=50, help='Number of epochs to train.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size.')
