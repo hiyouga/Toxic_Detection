@@ -11,8 +11,9 @@ class BERT(nn.Module):
         self.dropout = nn.Dropout(configs['dropout'])
         self.dense = nn.Linear(768, configs['num_classes'])
 
-    def forward(self, text):
-        mask = torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
+    def forward(self, text, mask=None):
+        if not mask:
+            mask = torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
         output = self.bert(input_ids=text, attention_mask=mask)
         cls_out = output[0][:, 0, :]
         output = self.dense(self.dropout(cls_out))

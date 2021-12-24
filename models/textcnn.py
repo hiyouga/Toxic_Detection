@@ -23,7 +23,9 @@ class TextCNN(nn.Module):
         self.linear = nn.Linear(len(KS) * KN, C)
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, text):
+    def forward(self, text, mask=None):
+        if mask:
+            text = torch.mul(text, mask)
         word_emb = self.dropout(self.embed(text))
         maxpool_out = list()
         for conv in self.conv:

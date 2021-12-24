@@ -17,7 +17,9 @@ class TextRNN(nn.Module):
         self.linear = nn.Linear(HD * 2, C)
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, text):
+    def forward(self, text, mask=None):
+        if mask:
+            text = torch.mul(text, mask)
         word_emb = self.dropout(self.embed_layer(text))
         text_len = torch.sum(text!=0, dim=-1)
         rnn_output, _ = self.rnn(word_emb, text_len.cpu())
