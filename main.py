@@ -8,7 +8,7 @@ import argparse
 import warnings
 import datetime
 import numpy as np
-from trainer import Trainer
+from trainers import DefaultTrainer
 from data_utils import load_data
 from models import textcnn, textrnn, restext, bert
 from evaluation import evaluate
@@ -27,7 +27,7 @@ class Instructor:
         self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
         configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
         self.logger.info('=> creating model')
-        self.trainer = Trainer(args.model_class(configs), args)
+        self.trainer = DefaultTrainer(args.model_class(configs), args)
         self.trainer.to(args.device)
         if args.device.type == 'cuda':
             self.logger.info(f"=> cuda memory allocated: {torch.cuda.memory_allocated(self.args.device.index)}")

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class Trainer:
+class DefaultTrainer:
 
     def __init__(self, model, args):
         self.model = model
