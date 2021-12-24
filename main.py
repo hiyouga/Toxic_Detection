@@ -27,7 +27,8 @@ class Instructor:
         self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
         configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
         self.logger.info('=> creating model')
-        self.trainer = DefaultTrainer(args.model_class(configs), args)
+        writer = None
+        self.trainer = DefaultTrainer(args.model_class(configs), writer, args)
         self.trainer.to(args.device)
         if args.device.type == 'cuda':
             self.logger.info(f"=> cuda memory allocated: {torch.cuda.memory_allocated(self.args.device.index)}")
@@ -45,55 +46,25 @@ class Instructor:
             torch.save(self.trainer.save_state_dict(), os.path.join('state_dict', f"{self.args.timestamp}.pt"))
         return best_record
 
-    def _train(self, dataloader):
-        train_loss, n_correct, n_train = 0, 0, 0
-        n_batch = len(dataloader)
-        self.trainer.train_mode()
-        for i_batch, sample_batched in enumerate(dataloader):
-            inputs, targets = sample_batched['text'].to(self.args.device), sample_batched['target'].to(self.args.device)
-            outputs, loss = self.trainer.train(inputs, targets)
-            train_loss += loss.item() * targets.size(0)
-            n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
-            n_train += targets.size(0)
-            if not self.args.no_bar:
-                ratio = int((i_batch+1)*50/n_batch) # process bar
-                print(f"[{'>'*ratio}{' '*(50-ratio)}] {i_batch+1}/{n_batch} {(i_batch+1)*100/n_batch:.2f}%", end='\r')
-        if not self.args.no_bar:
-            print()
-        return train_loss / n_train, n_correct / n_train
+    def _train(self, dataloader, epoch):
+        train_loss, train_acc, _ = self.trainer.train(dataloader, epoch)
+        return train_loss, train_acc
 
-    def _validate(self, dataloader, inference=False):
-        val_loss, n_correct, n_val = 0, 0, 0
-        all_cid, all_pred = list(), list()
-        n_batch = len(dataloader)
-        self.trainer.eval_mode()
-        with torch.no_grad():
-            all_pred = []
-            for i_batch, sample_batched in enumerate(dataloader):
-                inputs, targets = sample_batched['text'].to(self.args.device), sample_batched['target'].to(self.args.device)
-                outputs, loss = self.trainer.evaluate(inputs, targets)
-                val_loss += loss.item() * targets.size(0)
-                n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
-                all_cid.extend(sample_batched['id'])
-                all_pred.extend([pred.item() for pred in torch.argmax(outputs, -1)])
-                n_val += targets.size(0)
-                if not self.args.no_bar:
-                    ratio = int((i_batch+1)*50/n_batch) # process bar
-                    print(f"[{'>'*ratio}{' '*(50-ratio)}] {i_batch+1}/{n_batch} {(i_batch+1)*100/n_batch:.2f}%", end='\r')
-        if not self.args.no_bar:
-            print()
+    def _validate(self, dataloader, epoch=None, inference=False):
         if inference:
+            all_cid, all_pred, _ = self.trainer.predict(dataloader)
             return all_cid, all_pred
         else:
+            val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader, epoch)
             ''' bias auc may be nan when a subgroup is empty '''
             overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
-            return val_loss / n_val, n_correct / n_val, overall_auc, bias_auc, final_score
+            return val_loss, val_acc, overall_auc, bias_auc, final_score
 
     def run(self):
         best_record = {'epoch': 0, 'overall_auc': 0, 'model_state': None}
         for epoch in range(self.args.num_epoch):
-            train_loss, train_acc = self._train(self.train_dataloader)
-            val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader)
+            train_loss, train_acc = self._train(self.train_dataloader, epoch)
+            val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader, epoch)
             self.trainer.lr_scheduler_step()
             best_record = self._update_record(epoch+1, overall_auc, best_record)
             self.logger.info(f"{epoch+1}/{self.args.num_epoch} - {100*(epoch+1)/self.args.num_epoch:.2f}%")
