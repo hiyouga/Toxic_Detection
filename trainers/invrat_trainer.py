@@ -183,8 +183,10 @@ class InvratTrainer:
             enable_n_correct += (torch.argmax(env_enable_logits, -1) == targets).sum().item()
             n_train += targets.size(0)
             all_cid.extend(sample_batched['id'])
-            inv_preds.extend([pred.item() for pred in torch.argmax(env_inv_logits, -1)])
-            enable_preds.extend([pred.item() for pred in torch.argmax(env_enable_logits, -1)])
+            outputs = torch.softmax(env_inv_logits, dim=-1)
+            inv_preds.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
+            outputs = torch.softmax(env_enable_logits, dim=-1)
+            enable_preds.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
             if self.writer:
                 self.writer.add_scalar(f"train/g_loss", gen_loss.item(), global_step)
                 self.writer.add_scalar(f"train/inv_loss", env_inv_loss.item(), global_step)
@@ -220,7 +222,8 @@ class InvratTrainer:
             rationale, env_inv_logits, _ = self._step(inputs, masks, inv_only=True, not_use_rationale=False)
             # log sth necessary
             all_cid.extend(sample_batched['id'])
-            inv_preds.extend([pred.item() for pred in torch.argmax(env_inv_logits, -1)])
+            outputs = torch.softmax(env_inv_logits, dim=-1)
+            inv_preds.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
             if rationale:
                 all_rationale.extend(rationale.tolist())
             if not self.no_bar:
