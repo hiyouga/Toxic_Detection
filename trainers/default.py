@@ -86,7 +86,8 @@ class DefaultTrainer:
                 val_loss += loss.item() * targets.size(0)
                 n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
                 all_cid.extend(sample_batched['id'])
-                all_pred.extend([pred.item() for pred in torch.argmax(outputs, -1)])
+                outputs = nn.functional.softmax(outputs, dim=-1)
+                all_pred.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
                 n_val += targets.size(0)
                 if not self.no_bar:
                     ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
@@ -106,7 +107,8 @@ class DefaultTrainer:
                 masks = sample_batched['mask'].to(self.device)
                 outputs, loss = self._predict_step(inputs, masks)
                 all_cid.extend(sample_batched['id'])
-                all_pred.extend([pred.item() for pred in torch.argmax(outputs, -1)])
+                outputs = nn.functional.softmax(outputs, dim=-1)
+                all_pred.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
                 if not self.no_bar:
                     ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
                     print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
