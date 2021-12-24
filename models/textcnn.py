@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from . import multienv
+
 
 class TextCNN(nn.Module):
 
@@ -23,10 +25,25 @@ class TextCNN(nn.Module):
         self.linear = nn.Linear(len(KS) * KN, C)
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, text, mask=None):
-        if mask:
+        self.use_env = configs['use_env']
+        if self.use_env:
+            accumulator = configs['accumulator']
+            self.env_model = multienv(WD, accumulator)
+
+    def forward(self, text, mask=None, env=None):
+        if self.use_env and env is None:
+            raise RuntimeWarning("build a env-enable model, but get no env input")
+        if not self.use_env and env is not None:
+            raise RuntimeError("build a env-free model, but get env input")
+
+        if mask is not None:
             text = torch.mul(text, mask)
-        word_emb = self.dropout(self.embed(text))
+        word_emb = self.embed(text)
+        if self.use_env and env is not None:
+            env_embeddings = self.env_model(env)
+            env_embeddings = env_embeddings.unsqueeze(dim=1).expand_as(word_emb)
+            word_emb += env_embeddings
+        word_emb = self.dropout(word_emb)
         maxpool_out = list()
         for conv in self.conv:
             cnn_out_i = conv(word_emb.transpose(1, 2))
