@@ -24,11 +24,10 @@ class TextCNN(nn.Module):
         self.maxpool = nn.AdaptiveMaxPool1d(1)
         self.linear = nn.Linear(len(KS) * KN, C)
         self.dropout = nn.Dropout(0.1)
-
-        if 'use_env' in configs:
-            self.use_env = configs['use_env']
-        else:
-            self.use_env = False
+        self.output_token_hidden = configs['output_token_hidden'] if 'output_token_hidden' in configs else False
+        if self.output_token_hidden:
+            raise ValueError("CNN model should not use for token output because not same length")
+        self.use_env = configs['use_env'] if 'use_env' in configs else False
         if self.use_env:
             accumulator = configs['accumulator']
             self.env_model = multienv(WD, accumulator)

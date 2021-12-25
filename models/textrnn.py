@@ -18,10 +18,8 @@ class TextRNN(nn.Module):
         self.linear = nn.Linear(HD * 2, C)
         self.dropout = nn.Dropout(0.1)
 
-        if 'use_env' in configs:
-            self.use_env = configs['use_env']
-        else:
-            self.use_env = False
+        self.output_token_hidden = configs['output_token_hidden'] if 'output_token_hidden' in configs else False
+        self.use_env = configs['use_env'] if 'use_env' in configs else False
         if self.use_env:
             accumulator = configs['accumulator']
             self.env_model = multienv(WD, accumulator)
@@ -50,9 +48,13 @@ class TextRNN(nn.Module):
             word_emb += env_embeddings
         word_emb = self.dropout(word_emb)
         rnn_output, _ = self.rnn(word_emb, text_len.cpu())
-        output = rnn_output.sum(dim=1).div(text_len.float().unsqueeze(-1))
-        output = self.linear(self.dropout(output))
-        return output
+        if self.output_token_hidden:
+            output = self.linear(self.dropout(rnn_output))
+            return output
+        else:
+            output = rnn_output.sum(dim=1).div(text_len.float().unsqueeze(-1))
+            output = self.linear(self.dropout(output))
+            return output
 
 
 def textrnn(configs):

@@ -12,11 +12,8 @@ class BERT(nn.Module):
         self.bert = BertModel.from_pretrained(configs['bert_name'])
         self.dropout = nn.Dropout(configs['dropout'])
         self.dense = nn.Linear(768, configs['num_classes'])
-
-        if 'use_env' in configs:
-            self.use_env = configs['use_env']
-        else:
-            self.use_env = False
+        self.output_token_hidden = configs['output_token_hidden'] if 'output_token_hidden' in configs else False
+        self.use_env = configs['use_env'] if 'use_env' in configs else False
         if self.use_env:
             accumulator = configs['accumulator']
             self.env_model = multienv(768, accumulator)
@@ -39,9 +36,13 @@ class BERT(nn.Module):
             embedding_output += env_embeddings
         encoder_outputs = self.bert.encoder(embedding_output, attention_mask=extended_attention_mask)
         sequence_output = encoder_outputs[0]
-        cls_out = sequence_output[:, 0]
-        output = self.dense(self.dropout(cls_out))
-        return output
+        if self.output_token_hidden:
+            output = self.dense(self.dropout(sequence_output))
+            return output
+        else:
+            cls_out = sequence_output[:, 0]
+            output = self.dense(self.dropout(cls_out))
+            return output
 
 
 def bert(configs):
