@@ -8,7 +8,7 @@ import argparse
 import warnings
 import datetime
 import numpy as np
-from trainers import DefaultTrainer
+from trainers import DefaultTrainer, InvratTrainer
 from data_utils import load_data
 from models import textcnn, textrnn, restext, bert
 from evaluation import evaluate
@@ -25,13 +25,24 @@ class Instructor:
         self._print_args()
         dataloaders = load_data(batch_size=args.batch_size, bert_name=args.bert_name)
         self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
-        configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
         self.logger.info('=> creating model')
         writer = None
-        self.trainer = DefaultTrainer(args.model_class(configs), writer, args)
+        if args.do_invrat:
+            rationale_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1,
+                                 'output_token_hidden': True}
+            inv_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
+            enable_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1,
+                              'use_env': True, 'accumulator': args.accumulator}
+            models = [args.rationale_model_class(rationale_configs), args.model_class(inv_configs), args.model_class(enable_configs)]
+            self.trainer = InvratTrainer(models, writer, args)
+        else:
+            configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
+            model = args.model_class(configs)
+            self.trainer = DefaultTrainer(model, writer, args)
         self.trainer.to(args.device)
         if args.device.type == 'cuda':
             self.logger.info(f"=> cuda memory allocated: {torch.cuda.memory_allocated(self.args.device.index)}")
+        print('=> build Instructor done')
 
     def _print_args(self):
         print('TRAINING ARGUMENTS:')
@@ -47,14 +58,17 @@ class Instructor:
         return best_record
 
     def _train(self, dataloader, epoch):
+        print(f"[train] epoch: {epoch}  ")
         train_loss, train_acc, _ = self.trainer.train(dataloader, epoch)
         return train_loss, train_acc
 
     def _validate(self, dataloader, epoch=None, inference=False):
         if inference:
+            print(f"[inference] epoch: {epoch}  ")
             all_cid, all_pred, _ = self.trainer.predict(dataloader)
             return all_cid, all_pred
         else:
+            print(f"[val] epoch: {epoch}  ")
             val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader, epoch)
             ''' bias auc may be nan when a subgroup is empty '''
             overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
@@ -100,8 +114,23 @@ if __name__ == '__main__':
     parser.add_argument('--timestamp', type=str, default=None, help='Experiment timestamp.')
     parser.add_argument('--no_bar', default=False, action='store_true', help='Disable process bar.')
     parser.add_argument('--no_backend', default=False, action='store_true', help='Use frontend matplotlib.')
+    ''' invrat '''
+    trainer_classes = {'default': DefaultTrainer, 'invrat': InvratTrainer}
+    parser.add_argument('--trainer_name', default='default', type=str, choices=trainer_classes.keys(), help='choose trainer')
+    parser.add_argument('--rationale_name', type=str, default=None, help='rationale generator model class name')
+    parser.add_argument('--accumulator', type=str, default='sum', help='multi env pooler')
+    parser.add_argument('--sparsity_percentage', type=float, default=0.5, help='the sparsity percentage for rationale')
+    parser.add_argument('--sparsity_lambda', type=float, default=1, help='the penalty coefficient for rationale sparsity loss')
+    parser.add_argument('--continuity_lambda', type=float, default=1, help='the penalty coefficient for rationale continuity loss')
+    parser.add_argument('--diff_lambda', type=float, default=1,
+                        help='the penalty coefficient for env_inv model and env_enable model diff loss')
+
     args = parser.parse_args()
     args.model_class = model_classes[args.model_name]
+    args.trainer_class = trainer_classes[args.trainer_name]
+    args.do_invrat = (args.trainer_name == 'invrat')
+    if args.do_invrat:
+        args.rationale_model_class = model_classes[args.rationale_name]
     args.log_name = f"{args.model_name}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')[2:]}.log"
     args.timestamp = args.timestamp if args.timestamp else str(int(time.time())) + format(random.randint(0, 999), '03')
     args.seed = args.seed if args.seed else random.randint(0, 2**32-1)
