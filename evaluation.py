@@ -88,11 +88,17 @@ def read_json(fname):
     return df
 
 
-def evaluate(y_pred):
+def evaluate(y_pred, y_id=None):
     df = read_json('dev.json')
+    if y_id is not None:
+        df_index = df.set_index('id')
+        df_select = df_index.loc[y_id]
+    else:
+        df_select = df
     model_name = 'pred'
-    df[model_name] = y_pred
-    bias_metrics_df = compute_bias_metrics_for_model(df, identity_columns, model_name, TOXICITY_COLUMN)
-    overall_auc = calculate_overall_auc(df, model_name)
+    # df[model_name] = y_pred
+    df_select[model_name] = y_pred
+    bias_metrics_df = compute_bias_metrics_for_model(df_select, identity_columns, model_name, TOXICITY_COLUMN)
+    overall_auc = calculate_overall_auc(df_select, model_name)
     Bias_AUC, final_score = get_final_metric(bias_metrics_df, overall_auc)
     return overall_auc, Bias_AUC, final_score

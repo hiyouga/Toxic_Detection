@@ -16,6 +16,7 @@ from transformers import AutoModel
 from copy import deepcopy
 from pathlib import Path
 
+
 def bert_backbone_config(name):
     backbone = AutoModel.from_pretrained(name)
     arch = str(name).split('-')[0]
@@ -85,21 +86,19 @@ class Instructor:
     def _train(self, dataloader, epoch, eva_update_func):
         self.trainer.train(dataloader, epoch, eva_update_func)
 
-    def _validate(self, dataloader, inference=False):
+    def _validate(self, dataloader, max_steps=None, inference=False):
         torch.cuda.empty_cache()
         if inference:
             all_cid, all_pred, _ = self.trainer.predict(dataloader)
             return all_cid, all_pred
         else:
-            val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader)
+            val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader, max_steps)
             ''' bias auc may be nan when a subgroup is empty '''
-            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
+            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred), np.array(all_cid))
             return val_loss, val_acc, overall_auc, bias_auc, final_score
 
-    def evaluate_and_update(self, global_step):
-        self.logger.info('*****************************')
-        self.logger.info(f"at step: {global_step}")
-        val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader)
+    def evaluate_and_update(self, global_step, max_steps):
+        val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader, max_steps)
         self.best_record = self._update_record(global_step, overall_auc, self.best_record)
         self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc * 100:.2f}")
         self.logger.info(f"[val] auc: {overall_auc * 100:.2f}, bias_auc: {bias_auc * 100:.2f}, score: {final_score * 100:.2f}")
@@ -109,7 +108,6 @@ class Instructor:
         with open(fname, 'w', encoding='utf-8') as f:
             f.write('\n'.join([f"{cid} {pred}" for cid, pred in zip(all_cid, all_pred)]))
         self.logger.info(f"submission result saved: {fname}")
-        self.logger.info('*****************************')
 
     def run(self):
         for epoch in range(self.args.num_epoch):

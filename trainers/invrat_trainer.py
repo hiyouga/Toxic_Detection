@@ -24,7 +24,7 @@ class InvratTrainer:
         params, optimizers, schedulers = [], [], []
         for model in self.models:
             param = filter(lambda p: p.requires_grad, model.parameters())
-            optimizer = torch.optim.Adam(param, lr=args.lr, weight_decay=args.decay)
+            optimizer = torch.optim.AdamW(param, lr=args.lr, weight_decay=args.decay)
             params.append(param), optimizers.append(optimizer)
         self.params, self.optimizers = _Invrats(*params), _Invrats(*optimizers)
 
@@ -139,7 +139,9 @@ class InvratTrainer:
             if not self.no_bar:
                 ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
                 print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
-            if global_step % 300 == 0 or i_batch == n_batch - 1:
+            if (global_step >= 10000) and (global_step % 1000 == 0 or i_batch == n_batch - 1):
+                if not self.no_bar:
+                    print()
                 g_loss = g_loss / n_train if n_train > 0 else 'not_available'
                 inv_loss = inv_loss / n_train if n_train > 0 else 'not_available'
                 enable_loss = enable_loss / n_train if n_train > 0 else 'not_available'
@@ -151,19 +153,30 @@ class InvratTrainer:
                         "inv_acc": inv_acc,
                         "enable_acc": enable_acc,
                         }
-                print(f"at step {global_step}")
-                print(f"[train] {_log}")
-                eva_update_func(global_step)
+                print(f"[step] {global_step}")
+                print(f"[train] ", end='')
+                for k, v in _log.items():
+                    print(f" {k}: {v:.4f} ", end='')
+                print()
+                if global_step % 10000 == 0:
+                    max_steps = None
+                else:
+                    max_steps = 2000
+                eva_update_func(global_step, max_steps)
                 g_loss, inv_loss, inv_n_correct, enable_loss, enable_n_correct, n_train = 0, 0, 0, 0, 0, 0
         if not self.no_bar:
             print()
 
-    def evaluate(self, dataloader, epoch=None):
+    def evaluate(self, dataloader, max_steps=None, epoch=None):
         self.eval_mode()
         all_cid, inv_preds, enable_preds = [], [], []
         g_loss, inv_loss, inv_n_correct, enable_loss, enable_n_correct, n_train = 0, 0, 0, 0, 0, 0
         n_batch = len(dataloader)
+        if max_steps is None:
+            max_steps = n_batch
         for i_batch, sample_batched in enumerate(dataloader):
+            if i_batch > max_steps:
+                break
             global_step = epoch * n_batch + i_batch if epoch else i_batch
             # do forward
             inputs = sample_batched['text'].to(self.device)
@@ -192,11 +205,11 @@ class InvratTrainer:
                 self.writer.add_scalar(f"train/g_loss", gen_loss.item(), global_step)
                 self.writer.add_scalar(f"train/inv_loss", env_inv_loss.item(), global_step)
                 self.writer.add_scalar(f"train/enable_loss", env_enable_loss.item(), global_step)
-            if not self.no_bar:
-                ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
-                print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
-        if not self.no_bar:
-            print()
+        #     if not self.no_bar:
+        #         ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
+        #         print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
+        # if not self.no_bar:
+        #     print()
         g_loss = g_loss / n_train
         inv_loss = inv_loss / n_train
         enable_loss = enable_loss / n_train
@@ -227,11 +240,11 @@ class InvratTrainer:
             inv_preds.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
             if rationale is not None:
                 all_rationale.extend(rationale.tolist())
-            if not self.no_bar:
-                ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
-                print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
-        if not self.no_bar:
-            print()
+        #     if not self.no_bar:
+        #         ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
+        #         print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
+        # if not self.no_bar:
+        #     print()
         return all_cid, inv_preds, {'rationale': all_rationale}
 
     # ##############################
