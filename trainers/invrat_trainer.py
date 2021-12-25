@@ -14,7 +14,7 @@ class InvratTrainer:
         self.diff_lambda = args.diff_lambda
         self.predict_use_rationale = True
 
-        if isinstance(models, tuple):
+        if isinstance(models, (tuple, list)):
             self.models = _Invrats(*models)
         elif isinstance(models, dict):
             self.models = _Invrats(**models)
@@ -80,7 +80,7 @@ class InvratTrainer:
             rationale = masks
         else:
             gen_logits = self.models.generator(inputs, masks)
-            rationale = self._independent_straight_through_sampling(gen_logits)
+            rationale = self._independent_straight_through_sampling(gen_logits, inputs.shape)
             # rationale (batch, seq_length)
             rationale = masks * rationale
         # ################## env_inv predictor ################## #
@@ -89,7 +89,7 @@ class InvratTrainer:
             return rationale, env_inv_logits, None
         # ################## env_enable predictor ################## #
         # TODO: make model forward can deal with envs
-        env_enable_logits = self.models.env_inv(inputs, rationale, envs)
+        env_enable_logits = self.models.env_enable(inputs, rationale, envs)
         return rationale, env_inv_logits, env_enable_logits
 
     def train(self, dataloader, epoch):
@@ -238,8 +238,8 @@ class InvratTrainer:
     # ##############################
 
     @staticmethod
-    def _independent_straight_through_sampling(rationale_logits):
-        assert rationale_logits.shape[-1] == 2, f"rationale_logits.shape should be (batch,seq_length,2) but got {rationale_logits.shape}"
+    def _independent_straight_through_sampling(rationale_logits, id_shape):
+        assert rationale_logits.shape[-1] == 2, f"rationale_logits.shape should be f{(*id_shape, 2)} but got {rationale_logits.shape}"
         # rationale_logits (batch, seq_length, 2)
         y_soft = torch.max(rationale_logits, dim=-1, keepdim=True)[0]
         y_hard = (y_soft == rationale_logits).to(rationale_logits.dtype)
