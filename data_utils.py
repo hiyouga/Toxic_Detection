@@ -113,6 +113,8 @@ class ToxicDataset(Dataset):
                     data['target'] = 0
                 else:
                     data['target'] = 0 if data['target'] < 0.5 else 1
+                if 'env' in data.keys():
+                    data['env'] = np.asarray(data['env']).astype(data['text'].dtype)
                 dataset.append(data)
             pickle.dump(dataset, open(cache_file, 'wb'))
         self._dataset = dataset
@@ -173,7 +175,10 @@ def build_tokenizer(fnames, bert_name):
 
 def load_data(batch_size, bert_name=None):
     tokenizer = build_tokenizer(fnames=['train.json', 'dev.json'], bert_name=bert_name)
-    embedding_matrix = build_embedding_matrix(tokenizer.vocab)
+    if bert_name is None:
+        embedding_matrix = build_embedding_matrix(tokenizer.vocab)
+    else:
+        embedding_matrix = None
     trainset = ToxicDataset('train.json', tokenizer, split='train', bert_name=bert_name)
     devset = ToxicDataset('dev.json', tokenizer, split='dev', bert_name=bert_name)
     testset = ToxicDataset('test.json', tokenizer, split='test', bert_name=bert_name)

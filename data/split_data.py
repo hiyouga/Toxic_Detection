@@ -14,7 +14,7 @@ group2subgroups = {
 }
 
 
-def row2envs_id(ex_row: pd.Series):
+def row2envs_id(ex_row: pd.Series, verbose=False):
     envs_id = []
     for g, subs in group2subgroups.items():
         found = 0
@@ -25,6 +25,9 @@ def row2envs_id(ex_row: pd.Series):
                 break
         if not found:
             envs_id.append(0)
+        if verbose:
+            print(ex_row[subs[1:]])
+            print(envs_id)
     return envs_id
 
 if __name__ == '__main__':
