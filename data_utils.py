@@ -2,7 +2,7 @@ import os
 import json
 import pickle
 import numpy as np
-from transformers import BertTokenizer
+from transformers import AutoTokenizer
 from torch.utils.data import Dataset, DataLoader
 
 
@@ -51,7 +51,7 @@ class Tokenizer:
         self.vocab = vocab
         self.maxlen = 256
         self.lower = lower
-        self.bert_tokenizer = BertTokenizer.from_pretrained(bert_name) if bert_name else None
+        self.bert_tokenizer = AutoTokenizer.from_pretrained(bert_name) if bert_name else None
 
     @classmethod
     def from_files(cls, fnames, lower=True):

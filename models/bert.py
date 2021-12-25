@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from transformers import BertModel
 
 from .env import multienv
 
@@ -9,7 +8,9 @@ class BERT(nn.Module):
 
     def __init__(self, configs):
         super(BERT, self).__init__()
-        self.bert = BertModel.from_pretrained(configs['bert_name'])
+        self.embeddings = configs["embeddings"]
+        self.encoder = configs["encoder"]
+        self.num_hidden_layers = configs["num_hidden_layers"]
         self.dropout = nn.Dropout(configs['dropout'])
         self.dense = nn.Linear(768, configs['num_classes'])
         self.output_token_hidden = configs['output_token_hidden'] if 'output_token_hidden' in configs else False
@@ -27,14 +28,15 @@ class BERT(nn.Module):
             mask = mask * torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
         else:
             mask = torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
-        extended_attention_mask = get_extended_attention_mask(mask)
         # hack huggingface/BertModel to add token_embedding with env_embedding
-        embedding_output = self.bert.embeddings(text)
+        embedding_output = self.embeddings(text)
         if self.use_env and env is not None:
             env_embeddings = self.env_model(env)
             env_embeddings = env_embeddings.unsqueeze(dim=1).expand_as(embedding_output)
             embedding_output += env_embeddings
-        encoder_outputs = self.bert.encoder(embedding_output, attention_mask=extended_attention_mask)
+        extended_attention_mask = get_extended_attention_mask(mask)
+        head_mask = [None] * self.num_hidden_layers
+        encoder_outputs = self.encoder(embedding_output, extended_attention_mask, head_mask)
         sequence_output = encoder_outputs[0]
         if self.output_token_hidden:
             output = self.dense(self.dropout(sequence_output))

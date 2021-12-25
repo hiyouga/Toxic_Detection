@@ -35,17 +35,17 @@ if __name__ == '__main__':
     extra_df = pd.read_csv('train_extra.csv')
     dev_ratio = 0.1
     length_dict = dict()
-    # attrs = [
-    #     'male',
-    #     'female',
-    #     'homosexual_gay_or_lesbian',
-    #     'christian',
-    #     'jewish',
-    #     'muslim',
-    #     'black',
-    #     'white',
-    #     'psychiatric_or_mental_illness'
-    # ]
+    attrs = [
+        'male',
+        'female',
+        'homosexual_gay_or_lesbian',
+        'christian',
+        'jewish',
+        'muslim',
+        'black',
+        'white',
+        'psychiatric_or_mental_illness'
+    ]
     dataset = list()
     for i in range(20000):
         row = train_df.loc[i]
@@ -61,9 +61,9 @@ if __name__ == '__main__':
             length_dict[length] += 1
         else:
             length_dict[length] = 1
-        # for attr in attrs:
-        #     data[attr] = extra_row[attr] if not np.isnan(extra_row[attr]) else -1
-        # data['identity_annotator_count'] = int(extra_row['identity_annotator_count'])
+        for attr in attrs:
+            data[attr] = extra_row[attr] if not np.isnan(extra_row[attr]) else -1
+        data['identity_annotator_count'] = int(extra_row['identity_annotator_count'])
         dataset.append(data)
     random.shuffle(dataset)
     trainset, devset = dataset[:int(len(dataset) * (1-dev_ratio))], dataset[int(len(dataset) * (1-dev_ratio)):]

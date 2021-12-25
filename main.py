@@ -12,6 +12,19 @@ from trainers import DefaultTrainer, InvratTrainer
 from data_utils import load_data
 from models import textcnn, textrnn, restext, bert
 from evaluation import evaluate
+from transformers import AutoModel
+from copy import deepcopy
+
+
+def bert_backbone_config(name):
+    backbone = AutoModel.from_pretrained(name)
+    arch = str(name).split('-')[0]
+    if arch in ['bert', 'roberta', "distilroberta"]:
+        return {'embeddings': backbone.embeddings, 'encoder': backbone.encoder, 'num_hidden_layers': backbone.config.num_hidden_layers}
+    if arch in ["distilbert"]:
+        return {'embeddings': backbone.embeddings, 'encoder': backbone.transformer, 'num_hidden_layers': backbone.config.num_hidden_layers}
+    else:
+        raise NotImplementedError(f"unsupported model {name}")
 
 
 class Instructor:
@@ -28,15 +41,26 @@ class Instructor:
         self.logger.info('=> creating model')
         writer = None
         if args.do_invrat:
-            rationale_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1,
-                                 'output_token_hidden': True}
-            inv_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
-            enable_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1,
-                              'use_env': True, 'accumulator': args.accumulator}
+            rationale_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'dropout': 0.1, 'output_token_hidden': True}
+            inv_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'dropout': 0.1}
+            enable_configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'dropout': 0.1, 'use_env': True,
+                              'accumulator': args.accumulator}
+            if args.bert_name:
+                update_config = bert_backbone_config(args.bert_name)
+                if args.weight_sharing:
+                    rationale_configs.update(update_config)
+                    inv_configs.update(update_config)
+                    enable_configs.update(update_config)
+                else:
+                    rationale_configs.update(deepcopy(update_config))
+                    inv_configs.update(deepcopy(update_config))
+                    enable_configs.update(deepcopy(update_config))
             models = [args.rationale_model_class(rationale_configs), args.model_class(inv_configs), args.model_class(enable_configs)]
             self.trainer = InvratTrainer(models, writer, args)
         else:
-            configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'bert_name': args.bert_name, 'dropout': 0.1}
+            configs = {'num_classes': 2, 'embedding_matrix': embedding_matrix, 'dropout': 0.1}
+            if args.bert_name:
+                configs.update(bert_backbone_config(args.bert_name))
             model = args.model_class(configs)
             self.trainer = DefaultTrainer(model, writer, args)
         self.trainer.to(args.device)
@@ -59,10 +83,12 @@ class Instructor:
 
     def _train(self, dataloader, epoch):
         print(f"[train] epoch: {epoch}  ")
+        torch.cuda.empty_cache()
         train_loss, train_acc, _ = self.trainer.train(dataloader, epoch)
         return train_loss, train_acc
 
     def _validate(self, dataloader, epoch=None, inference=False):
+        torch.cuda.empty_cache()
         if inference:
             print(f"[inference] epoch: {epoch}  ")
             all_cid, all_pred, _ = self.trainer.predict(dataloader)
@@ -80,19 +106,20 @@ class Instructor:
             train_loss, train_acc = self._train(self.train_dataloader, epoch)
             val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader, epoch)
             self.trainer.lr_scheduler_step()
-            best_record = self._update_record(epoch+1, overall_auc, best_record)
-            self.logger.info(f"{epoch+1}/{self.args.num_epoch} - {100*(epoch+1)/self.args.num_epoch:.2f}%")
-            self.logger.info(f"[train] loss: {train_loss:.4f}, acc: {train_acc*100:.2f}")
-            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc*100:.2f}")
-            self.logger.info(f"[val] auc: {overall_auc*100:.2f}, bias_auc: {bias_auc*100:.2f}, score: {final_score*100:.2f}")
-        self.logger.info(f"best overall auc: {best_record['overall_auc']*100:.2f}")
+            best_record = self._update_record(epoch + 1, overall_auc, best_record)
+            self.logger.info(f"{epoch + 1}/{self.args.num_epoch} - {100 * (epoch + 1) / self.args.num_epoch:.2f}%")
+            self.logger.info(f"[train] loss: {train_loss:.4f}, acc: {train_acc * 100:.2f}")
+            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc * 100:.2f}")
+            self.logger.info(f"[val] auc: {overall_auc * 100:.2f}, bias_auc: {bias_auc * 100:.2f}, score: {final_score * 100:.2f}")
+        self.logger.info(f"best overall auc: {best_record['overall_auc'] * 100:.2f}")
         if best_record['model_state'] is not None:
             self.trainer.load_state_dict(best_record['model_state'])
         self.logger.info(f"model saved: {self.args.timestamp}.pt")
         all_cid, all_pred = self._validate(self.test_dataloader, inference=True)
-        with open(f"{self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc']*100:.2f}.txt", 'w', encoding='utf-8') as f:
+        with open(f"{self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc'] * 100:.2f}.txt", 'w', encoding='utf-8') as f:
             f.write('\n'.join([f"{cid} {pred}" for cid, pred in zip(all_cid, all_pred)]))
-        self.logger.info(f"submission result saved: {self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc']*100:.2f}.txt")
+        self.logger.info(
+            f"submission result saved: {self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc'] * 100:.2f}.txt")
 
 
 if __name__ == '__main__':
@@ -122,8 +149,8 @@ if __name__ == '__main__':
     parser.add_argument('--sparsity_percentage', type=float, default=0.5, help='the sparsity percentage for rationale')
     parser.add_argument('--sparsity_lambda', type=float, default=1, help='the penalty coefficient for rationale sparsity loss')
     parser.add_argument('--continuity_lambda', type=float, default=1, help='the penalty coefficient for rationale continuity loss')
-    parser.add_argument('--diff_lambda', type=float, default=1,
-                        help='the penalty coefficient for env_inv model and env_enable model diff loss')
+    parser.add_argument('--diff_lambda', type=float, default=1, help='the penalty coefficient for env_inv and env_enable model diff loss')
+    parser.add_argument('--weight_sharing', default=False, action='store_true', help='sharing bert weight among models')
 
     args = parser.parse_args()
     args.model_class = model_classes[args.model_name]
@@ -133,7 +160,7 @@ if __name__ == '__main__':
         args.rationale_model_class = model_classes[args.rationale_name]
     args.log_name = f"{args.model_name}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')[2:]}.log"
     args.timestamp = args.timestamp if args.timestamp else str(int(time.time())) + format(random.randint(0, 999), '03')
-    args.seed = args.seed if args.seed else random.randint(0, 2**32-1)
+    args.seed = args.seed if args.seed else random.randint(0, 2 ** 32 - 1)
     args.device = torch.device(args.device) if args.device else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ''' set seeds '''
     random.seed(args.seed)

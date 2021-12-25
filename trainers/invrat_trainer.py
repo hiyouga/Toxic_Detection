@@ -224,7 +224,7 @@ class InvratTrainer:
             all_cid.extend(sample_batched['id'])
             outputs = torch.softmax(env_inv_logits, dim=-1)
             inv_preds.extend([outputs[x][1].item() for x in range(outputs.shape[0])])
-            if rationale:
+            if rationale is not None:
                 all_rationale.extend(rationale.tolist())
             if not self.no_bar:
                 ratio = int((i_batch + 1) * 50 / n_batch)  # process bar

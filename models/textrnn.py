@@ -37,9 +37,9 @@ class TextRNN(nn.Module):
             raise RuntimeError("build a env-free model, but get env input")
 
         text_len = torch.sum(text != 0, dim=-1)
-        if mask is not None:
-            text = torch.mul(text, mask)
         word_emb = self.embed_layer(text)
+        if mask is not None:
+            word_emb = torch.mul(word_emb, mask.unsqueeze(-1))
         if self.use_env and env is not None:
             # env_embeddings (batch, hidden_dim)
             env_embeddings = self.env_model(env)
