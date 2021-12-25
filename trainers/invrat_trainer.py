@@ -25,9 +25,8 @@ class InvratTrainer:
         for model in self.models:
             param = filter(lambda p: p.requires_grad, model.parameters())
             optimizer = torch.optim.Adam(param, lr=args.lr, weight_decay=args.decay)
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.num_epoch)
-            params.append(param), optimizers.append(optimizer), schedulers.append(scheduler)
-        self.params, self.optimizers, self.schedulers = _Invrats(*params), _Invrats(*optimizers), _Invrats(*schedulers)
+            params.append(param), optimizers.append(optimizer)
+        self.params, self.optimizers = _Invrats(*params), _Invrats(*optimizers)
 
         self.criterion = nn.CrossEntropyLoss()
         self._clip_norm = args.clip_norm
@@ -40,8 +39,7 @@ class InvratTrainer:
             optimizer.zero_grad()
 
     def lr_scheduler_step(self):
-        for scheduler in self.schedulers:
-            scheduler.step()
+        pass
 
     def to(self, device):
         for model in self.models:
@@ -92,7 +90,7 @@ class InvratTrainer:
         env_enable_logits = self.models.env_enable(inputs, rationale, envs)
         return rationale, env_inv_logits, env_enable_logits
 
-    def train(self, dataloader, epoch):
+    def train(self, dataloader, epoch, eva_update_func):
         self.train_mode()
         g_loss, inv_loss, inv_n_correct, enable_loss, enable_n_correct, n_train = 0, 0, 0, 0, 0, 0
         n_batch = len(dataloader)
@@ -141,21 +139,24 @@ class InvratTrainer:
             if not self.no_bar:
                 ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
                 print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
-
+            if global_step % 300 == 0 or i_batch == n_batch - 1:
+                g_loss = g_loss / n_train if n_train > 0 else 'not_available'
+                inv_loss = inv_loss / n_train if n_train > 0 else 'not_available'
+                enable_loss = enable_loss / n_train if n_train > 0 else 'not_available'
+                inv_acc = inv_n_correct / n_train if n_train > 0 else 'not_available'
+                enable_acc = enable_n_correct / n_train if n_train > 0 else 'not_available'
+                _log = {"g_loss": g_loss,
+                        "inv_loss": inv_loss,
+                        "enable_loss": enable_loss,
+                        "inv_acc": inv_acc,
+                        "enable_acc": enable_acc,
+                        }
+                print(f"at step {global_step}")
+                print(f"[train] {_log}")
+                eva_update_func(global_step)
+                g_loss, inv_loss, inv_n_correct, enable_loss, enable_n_correct, n_train = 0, 0, 0, 0, 0, 0
         if not self.no_bar:
             print()
-        g_loss = g_loss / n_train
-        inv_loss = inv_loss / n_train
-        enable_loss = enable_loss / n_train
-        inv_acc = inv_n_correct / n_train
-        enable_acc = enable_n_correct / n_train
-
-        return inv_loss, inv_acc, {"g_loss": g_loss,
-                                   "inv_loss": inv_loss,
-                                   "enable_loss": enable_loss,
-                                   "inv_acc": inv_acc,
-                                   "enable_acc": enable_acc,
-                                   }
 
     def evaluate(self, dataloader, epoch=None):
         self.eval_mode()

@@ -10,13 +10,12 @@ class DefaultTrainer:
         self._clip_norm = args.clip_norm
         self.params = filter(lambda p: p.requires_grad, model.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=args.lr, weight_decay=args.decay)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, args.num_epoch)
         self.device = args.device
         self.no_bar = args.no_bar
         self.writer = writer
 
     def lr_scheduler_step(self):
-        self.scheduler.step()
+        pass
 
     def to(self, device):
         self.model.to(device)
@@ -51,11 +50,12 @@ class DefaultTrainer:
         outputs = self.model(inputs, masks)
         return outputs
 
-    def train(self, dataloader, epoch=None):
+    def train(self, dataloader, epoch, eva_update_func):
         train_loss, n_correct, n_train = 0, 0, 0
         n_batch = len(dataloader)
         self.train_mode()
         for i_batch, sample_batched in enumerate(dataloader):
+            global_step = epoch * n_batch + i_batch
             inputs = sample_batched['text'].to(self.device)
             masks = (inputs > 0).to(inputs.dtype)
             targets = sample_batched['target'].to(self.device)
@@ -66,9 +66,16 @@ class DefaultTrainer:
             if not self.no_bar:
                 ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
                 print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
+            if global_step % 300 == 0 or i_batch == n_batch - 1:
+                _log = {"loss": train_loss / n_train if n_train > 0 else 'not_available',
+                        "acc": n_correct / n_train if n_train > 0 else 'not_available',
+                        }
+                print(f"at step {global_step}")
+                print(f"[train] {_log}")
+                eva_update_func(global_step)
+                train_loss, n_correct, n_train = 0, 0, 0
         if not self.no_bar:
             print()
-        return train_loss / n_train, n_correct / n_train, {}
 
     def evaluate(self, dataloader, epoch=None):
         val_loss, n_correct, n_val = 0, 0, 0

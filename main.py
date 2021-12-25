@@ -14,7 +14,7 @@ from models import textcnn, textrnn, restext, bert
 from evaluation import evaluate
 from transformers import AutoModel
 from copy import deepcopy
-
+from pathlib import Path
 
 def bert_backbone_config(name):
     backbone = AutoModel.from_pretrained(name)
@@ -66,6 +66,7 @@ class Instructor:
         self.trainer.to(args.device)
         if args.device.type == 'cuda':
             self.logger.info(f"=> cuda memory allocated: {torch.cuda.memory_allocated(self.args.device.index)}")
+        self.best_record = {'epoch': 0, 'overall_auc': 0, 'model_state': None}
         print('=> build Instructor done')
 
     def _print_args(self):
@@ -73,53 +74,48 @@ class Instructor:
         for arg in vars(self.args):
             print(f">>> {arg}: {getattr(self.args, arg)}")
 
-    def _update_record(self, epoch, overall_auc, best_record):
+    def _update_record(self, global_step, overall_auc, best_record):
         if overall_auc > best_record['overall_auc']:
-            best_record['epoch'] = epoch
+            best_record['global_step'] = global_step
             best_record['overall_auc'] = overall_auc
             best_record['model_state'] = self.trainer.save_state_dict()
             torch.save(self.trainer.save_state_dict(), os.path.join('state_dict', f"{self.args.timestamp}.pt"))
         return best_record
 
-    def _train(self, dataloader, epoch):
-        print(f"[train] epoch: {epoch}  ")
-        torch.cuda.empty_cache()
-        train_loss, train_acc, _ = self.trainer.train(dataloader, epoch)
-        return train_loss, train_acc
+    def _train(self, dataloader, epoch, eva_update_func):
+        self.trainer.train(dataloader, epoch, eva_update_func)
 
-    def _validate(self, dataloader, epoch=None, inference=False):
+    def _validate(self, dataloader, inference=False):
         torch.cuda.empty_cache()
         if inference:
-            print(f"[inference] epoch: {epoch}  ")
             all_cid, all_pred, _ = self.trainer.predict(dataloader)
             return all_cid, all_pred
         else:
-            print(f"[val] epoch: {epoch}  ")
-            val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader, epoch)
+            val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader)
             ''' bias auc may be nan when a subgroup is empty '''
             overall_auc, bias_auc, final_score = evaluate(np.array(all_pred))
             return val_loss, val_acc, overall_auc, bias_auc, final_score
 
-    def run(self):
-        best_record = {'epoch': 0, 'overall_auc': 0, 'model_state': None}
-        for epoch in range(self.args.num_epoch):
-            train_loss, train_acc = self._train(self.train_dataloader, epoch)
-            val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader, epoch)
-            self.trainer.lr_scheduler_step()
-            best_record = self._update_record(epoch + 1, overall_auc, best_record)
-            self.logger.info(f"{epoch + 1}/{self.args.num_epoch} - {100 * (epoch + 1) / self.args.num_epoch:.2f}%")
-            self.logger.info(f"[train] loss: {train_loss:.4f}, acc: {train_acc * 100:.2f}")
-            self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc * 100:.2f}")
-            self.logger.info(f"[val] auc: {overall_auc * 100:.2f}, bias_auc: {bias_auc * 100:.2f}, score: {final_score * 100:.2f}")
-        self.logger.info(f"best overall auc: {best_record['overall_auc'] * 100:.2f}")
-        if best_record['model_state'] is not None:
-            self.trainer.load_state_dict(best_record['model_state'])
-        self.logger.info(f"model saved: {self.args.timestamp}.pt")
+    def evaluate_and_update(self, global_step):
+        self.logger.info('*****************************')
+        self.logger.info(f"at step: {global_step}")
+        val_loss, val_acc, overall_auc, bias_auc, final_score = self._validate(self.dev_dataloader)
+        self.best_record = self._update_record(global_step, overall_auc, self.best_record)
+        self.logger.info(f"[val] loss: {val_loss:.4f}, acc: {val_acc * 100:.2f}")
+        self.logger.info(f"[val] auc: {overall_auc * 100:.2f}, bias_auc: {bias_auc * 100:.2f}, score: {final_score * 100:.2f}")
         all_cid, all_pred = self._validate(self.test_dataloader, inference=True)
-        with open(f"{self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc'] * 100:.2f}.txt", 'w', encoding='utf-8') as f:
+        fname = f"{self.args.model_name}_{self.args.bert_name}_{self.args.timestamp}/{global_step}_{self.best_record['overall_auc'] * 100:.2f}.txt"
+        Path(fname).parent.mkdir(parents=True, exist_ok=True)
+        with open(fname, 'w', encoding='utf-8') as f:
             f.write('\n'.join([f"{cid} {pred}" for cid, pred in zip(all_cid, all_pred)]))
-        self.logger.info(
-            f"submission result saved: {self.args.model_name}_{self.args.timestamp}_{best_record['overall_auc'] * 100:.2f}.txt")
+        self.logger.info(f"submission result saved: {fname}")
+        self.logger.info('*****************************')
+
+    def run(self):
+        for epoch in range(self.args.num_epoch):
+            self._train(self.train_dataloader, epoch, self.evaluate_and_update)
+            # self.logger.info(f"{epoch + 1}/{self.args.num_epoch} - {100 * (epoch + 1) / self.args.num_epoch:.2f}%")
+            # self.logger.info(f"[train] loss: {train_loss:.4f}, acc: {train_acc * 100:.2f}")
 
 
 if __name__ == '__main__':
@@ -146,10 +142,10 @@ if __name__ == '__main__':
     parser.add_argument('--trainer_name', default='default', type=str, choices=trainer_classes.keys(), help='choose trainer')
     parser.add_argument('--rationale_name', type=str, default=None, help='rationale generator model class name')
     parser.add_argument('--accumulator', type=str, default='sum', help='multi env pooler')
-    parser.add_argument('--sparsity_percentage', type=float, default=0.5, help='the sparsity percentage for rationale')
+    parser.add_argument('--sparsity_percentage', type=float, default=0.2, help='the sparsity percentage for rationale')
     parser.add_argument('--sparsity_lambda', type=float, default=1, help='the penalty coefficient for rationale sparsity loss')
-    parser.add_argument('--continuity_lambda', type=float, default=1, help='the penalty coefficient for rationale continuity loss')
-    parser.add_argument('--diff_lambda', type=float, default=1, help='the penalty coefficient for env_inv and env_enable model diff loss')
+    parser.add_argument('--continuity_lambda', type=float, default=2, help='the penalty coefficient for rationale continuity loss')
+    parser.add_argument('--diff_lambda', type=float, default=10, help='the penalty coefficient for env_inv and env_enable model diff loss')
     parser.add_argument('--weight_sharing', default=False, action='store_true', help='sharing bert weight among models')
 
     args = parser.parse_args()
