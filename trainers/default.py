@@ -57,9 +57,8 @@ class DefaultTrainer:
         self.train_mode()
         for i_batch, sample_batched in enumerate(dataloader):
             inputs = sample_batched['text'].to(self.device)
-            masks = sample_batched['mask'].to(self.device)
+            masks = (inputs > 0).to(inputs.dtype)
             targets = sample_batched['target'].to(self.device)
-            # TODO: add mask support
             outputs, loss = self._train_step(inputs, masks, targets)
             train_loss += loss.item() * targets.size(0)
             n_correct += (torch.argmax(outputs, -1) == targets).sum().item()
@@ -80,7 +79,7 @@ class DefaultTrainer:
             all_pred = []
             for i_batch, sample_batched in enumerate(dataloader):
                 inputs = sample_batched['text'].to(self.device)
-                masks = sample_batched['mask'].to(self.device)
+                masks = (inputs > 0).to(inputs.dtype)
                 targets = sample_batched['target'].to(self.device)
                 outputs, loss = self._evaluate_step(inputs, masks, targets)
                 val_loss += loss.item() * targets.size(0)
@@ -104,7 +103,7 @@ class DefaultTrainer:
             all_pred = []
             for i_batch, sample_batched in enumerate(dataloader):
                 inputs = sample_batched['text'].to(self.device)
-                masks = sample_batched['mask'].to(self.device)
+                masks = (inputs > 0).to(inputs.dtype)
                 outputs, loss = self._predict_step(inputs, masks)
                 all_cid.extend(sample_batched['id'])
                 outputs = torch.softmax(outputs, dim=-1)

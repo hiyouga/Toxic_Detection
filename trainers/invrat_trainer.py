@@ -101,7 +101,7 @@ class InvratTrainer:
             self.zero_grad()
             # do forward
             inputs = sample_batched['text'].to(self.device)
-            masks = sample_batched['mask'].to(self.device)
+            masks = (inputs > 0).to(inputs.dtype)
             targets = sample_batched['target'].to(self.device)
             envs = sample_batched['env'].to(self.device)
             rationale, env_inv_logits, env_enable_logits = self._step(inputs, masks, envs)
@@ -166,7 +166,7 @@ class InvratTrainer:
             global_step = epoch * n_batch + i_batch if epoch else i_batch
             # do forward
             inputs = sample_batched['text'].to(self.device)
-            masks = sample_batched['mask'].to(self.device)
+            masks = (inputs > 0).to(inputs.dtype)
             targets = sample_batched['target'].to(self.device)
             envs = sample_batched['env'].to(self.device)
             rationale, env_inv_logits, env_enable_logits = self._step(inputs, masks, envs)
@@ -218,7 +218,7 @@ class InvratTrainer:
         for i_batch, sample_batched in enumerate(dataloader):
             # do forward
             inputs = sample_batched['text'].to(self.device)
-            masks = sample_batched['mask'].to(self.device)
+            masks = (inputs > 0).to(inputs.dtype)
             rationale, env_inv_logits, _ = self._step(inputs, masks, inv_only=True, not_use_rationale=False)
             # log sth necessary
             all_cid.extend(sample_batched['id'])
