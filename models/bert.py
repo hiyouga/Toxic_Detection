@@ -13,7 +13,10 @@ class BERT(nn.Module):
         self.dropout = nn.Dropout(configs['dropout'])
         self.dense = nn.Linear(768, configs['num_classes'])
 
-        self.use_env = configs['use_env']
+        if 'use_env' in configs:
+            self.use_env = configs['use_env']
+        else:
+            self.use_env = False
         if self.use_env:
             accumulator = configs['accumulator']
             self.env_model = multienv(768, accumulator)

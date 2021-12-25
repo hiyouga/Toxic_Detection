@@ -18,7 +18,10 @@ class TextRNN(nn.Module):
         self.linear = nn.Linear(HD * 2, C)
         self.dropout = nn.Dropout(0.1)
 
-        self.use_env = configs['use_env']
+        if 'use_env' in configs:
+            self.use_env = configs['use_env']
+        else:
+            self.use_env = False
         if self.use_env:
             accumulator = configs['accumulator']
             self.env_model = multienv(WD, accumulator)
