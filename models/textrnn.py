@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .layers import DynamicLSTM
-from . import multienv
+from .env import multienv
 
 
 class TextRNN(nn.Module):

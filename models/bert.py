@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import BertModel
 
-from . import multienv
+from .env import multienv
 
 
 class BERT(nn.Module):

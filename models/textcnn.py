@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from . import multienv
+from .env import multienv
 
 
 class TextCNN(nn.Module):
