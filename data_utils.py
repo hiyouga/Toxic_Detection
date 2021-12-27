@@ -1,6 +1,7 @@
 import os
 import json
 import pickle
+from pathlib import Path
 import numpy as np
 from transformers import AutoTokenizer
 from torch.utils.data import Dataset, DataLoader
@@ -78,8 +79,10 @@ class Tokenizer:
 
     def to_sequence(self, text, reverse=False, padding='post', truncating='post'):
         if self.bert_tokenizer is not None:
-            sequence = [101] + self.bert_tokenizer.convert_tokens_to_ids(self.bert_tokenizer.tokenize(text))
+            tokenized = self.bert_tokenizer(text, max_length=self.maxlen, truncation=True, padding='max_length', return_tensors='np')
+            return tokenized['input_ids'][0], tokenized['attention_mask'][0]
         else:
+            raise NotImplementedError("not add mask support")
             words = self.split_text(text.lower() if self.lower else text)
             sequence = [self.vocab.word_to_id(w) for w in words]
         if len(sequence) == 0:
@@ -99,7 +102,7 @@ class Tokenizer:
 class ToxicDataset(Dataset):
 
     def __init__(self, fname, tokenizer, split, bert_name):
-        cache_file = os.path.join('dats', f"{split}_{bert_name}.dat")
+        cache_file = os.path.join('dats', f"{Path(fname).stem}_{split}_{bert_name}.dat")
         if os.path.exists(cache_file):
             print(f"loading dataset: {cache_file}")
             dataset = pickle.load(open(cache_file, 'rb'))
@@ -108,7 +111,7 @@ class ToxicDataset(Dataset):
             dataset = list()
             fdata = json.load(open(os.path.join('data', fname), 'r', encoding='utf-8'))
             for data in fdata:
-                data['text'] = tokenizer.to_sequence(data['text'])
+                data['text'], data['mask'] = tokenizer.to_sequence(data['text'])
                 if split == 'test':
                     data['target'] = 0
                 else:
@@ -173,15 +176,15 @@ def build_tokenizer(fnames, bert_name):
     return tokenizer
 
 
-def load_data(batch_size, bert_name=None):
+def load_data(args, batch_size, bert_name=None):
     tokenizer = build_tokenizer(fnames=['train.json', 'dev.json'], bert_name=bert_name)
     if bert_name is None:
         embedding_matrix = build_embedding_matrix(tokenizer.vocab)
     else:
         embedding_matrix = None
-    trainset = ToxicDataset('train.json', tokenizer, split='train', bert_name=bert_name)
-    devset = ToxicDataset('dev.json', tokenizer, split='dev', bert_name=bert_name)
-    testset = ToxicDataset('test.json', tokenizer, split='test', bert_name=bert_name)
+    trainset = ToxicDataset(args.train_json, tokenizer, split='train', bert_name=bert_name)
+    devset = ToxicDataset(args.dev_json, tokenizer, split='dev', bert_name=bert_name)
+    testset = ToxicDataset(args.test_json, tokenizer, split='test', bert_name=bert_name)
     train_dataloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, pin_memory=True)
     dev_dataloader = DataLoader(devset, batch_size=batch_size, shuffle=False, pin_memory=True)
     test_dataloader = DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True)

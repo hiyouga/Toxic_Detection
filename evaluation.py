@@ -88,8 +88,8 @@ def read_json(fname):
     return df
 
 
-def evaluate(y_pred, y_id=None):
-    df = read_json('dev.json')
+def evaluate(y_pred, y_id=None, dev_json='dev.json'):
+    df = read_json(dev_json)
     if y_id is not None:
         df_index = df.set_index('id')
         df_select = df_index.loc[y_id]

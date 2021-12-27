@@ -30,6 +30,7 @@ def row2envs_id(ex_row: pd.Series, verbose=False):
             print(envs_id)
     return envs_id
 
+
 if __name__ == '__main__':
     train_df = pd.read_csv('train.csv')
     extra_df = pd.read_csv('train_extra.csv')
@@ -46,8 +47,10 @@ if __name__ == '__main__':
         'white',
         'psychiatric_or_mental_illness'
     ]
-    dataset = list()
-    for i in range(20000):
+    # dataset = list()
+    pos = list()
+    neg = list()
+    for i in range(50000):
         row = train_df.loc[i]
         extra_row = extra_df.loc[i]
         data = {
@@ -64,9 +67,19 @@ if __name__ == '__main__':
         for attr in attrs:
             data[attr] = extra_row[attr] if not np.isnan(extra_row[attr]) else -1
         data['identity_annotator_count'] = int(extra_row['identity_annotator_count'])
-        dataset.append(data)
-    random.shuffle(dataset)
-    trainset, devset = dataset[:int(len(dataset) * (1-dev_ratio))], dataset[int(len(dataset) * (1-dev_ratio)):]
+        if data['target'] > 0.5:
+            pos.append(data)
+        else:
+            neg.append(data)
+
+    random.shuffle(pos)
+    random.shuffle(neg)
+    print(f"(pos, neg) : {len(pos)}, {len(neg)}")
+    neg = neg[:len(pos) * 1]
+    print(f"(pos, neg) : {len(pos)}, {len(neg)}")
+    train_pos, dev_pos = pos[:int(len(pos) * (1 - dev_ratio))], pos[int(len(pos) * (1 - dev_ratio)):]
+    train_neg, dev_neg = neg[:int(len(neg) * (1 - dev_ratio))], neg[int(len(neg) * (1 - dev_ratio)):]
+    trainset, devset = train_pos + train_neg, dev_pos + dev_neg
     with open('train.json', 'w', encoding='utf-8') as f:
         f.write(json.dumps(trainset, sort_keys=False, indent=4))
         print(f"Processed {len(trainset)} training examples")
@@ -84,7 +97,7 @@ if __name__ == '__main__':
     total_num = sum(length_dict.values())
     ratio_dict = dict()
     accumulate = 0
-    for i in range(max(length_dict.keys())+1):
+    for i in range(max(length_dict.keys()) + 1):
         if i in length_dict:
             accumulate += length_dict[i]
             ratio_dict[i] = 100.0 * accumulate / total_num

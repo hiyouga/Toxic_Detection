@@ -1,3 +1,4 @@
+import sty
 import torch
 import torch.nn as nn
 from collections import namedtuple
@@ -13,6 +14,7 @@ class InvratTrainer:
         self.continuity_lambda = args.continuity_lambda
         self.diff_lambda = args.diff_lambda
         self.predict_use_rationale = True
+        self.args = args
 
         if isinstance(models, (tuple, list)):
             self.models = _Invrats(*models)
@@ -64,6 +66,18 @@ class InvratTrainer:
         state_dict = state_dict._asdict()
         return state_dict
 
+    def show_binary_rationale(self, tgt, inv_logit, en_logit, ids, z):
+        text = self.args.tokenizer.bert_tokenizer.convert_ids_to_tokens(ids)
+        output = f'[[{str(tgt)}]] [[{inv_logit}]] [[{en_logit}]]' + ' '
+        for i, word in enumerate(text):
+            if word == self.args.tokenizer.bert_tokenizer.pad_token:
+                break
+            if z[i] > 0.5:
+                output += sty.fg.red + word + sty.fg.rs + ' '
+            else:
+                output += word + ' '
+        print(output)
+
     def _step(self, inputs, masks, envs=None, inv_only=False, not_use_rationale=False):
         """
         inputs: (batch, seq_length)
@@ -99,9 +113,11 @@ class InvratTrainer:
             self.zero_grad()
             # do forward
             inputs = sample_batched['text'].to(self.device)
-            masks = (inputs > 0).to(inputs.dtype)
+            masks = sample_batched['mask'].to(self.device)
             targets = sample_batched['target'].to(self.device)
             envs = sample_batched['env'].to(self.device)
+            # print(f"inputs.shape: {inputs.shape}")
+            # print(f"masks.shape: {masks.shape}")
             rationale, env_inv_logits, env_enable_logits = self._step(inputs, masks, envs)
             env_inv_loss, env_enable_loss, diff_loss = self.inv_rat_loss(env_inv_logits, env_enable_logits, targets)
             sparsity_loss = self.sparsity_lambda * self.cal_sparsity_loss(rationale, masks)
@@ -139,15 +155,36 @@ class InvratTrainer:
             if not self.no_bar:
                 ratio = int((i_batch + 1) * 50 / n_batch)  # process bar
                 print(f"[{'>' * ratio}{' ' * (50 - ratio)}] {i_batch + 1}/{n_batch} {(i_batch + 1) * 100 / n_batch:.2f}%", end='\r')
-            if (global_step >= 10000) and (global_step % 1000 == 0 or i_batch == n_batch - 1):
+            if (global_step >= n_batch / 10) and (global_step % 500 == 0 or i_batch == n_batch - 1):
+            # if (global_step >= 30) and (global_step % 30 == 0 or i_batch == n_batch - 1):
                 if not self.no_bar:
                     print()
+                _inv_logits = torch.softmax(env_inv_logits, -1).cpu().detach().numpy()
+                _en_logits = torch.softmax(env_enable_logits, -1).cpu().detach().numpy()
+                _tgs = targets.cpu().detach().numpy()
+                _t_idx = 0
+                for _i, _v in enumerate(_tgs):
+                    if _v > 0.5:
+                        _t_idx = _i
+                        break
+                _f_idx = 0
+                for _i, _v in enumerate(_tgs):
+                    if _v < 0.5:
+                        _f_idx = _i
+                        break
+                self.show_binary_rationale(_tgs[_t_idx], _inv_logits[_t_idx], _en_logits[_t_idx], inputs[_t_idx].cpu().detach().numpy(),
+                                           rationale[_t_idx].cpu().detach().numpy())
+                self.show_binary_rationale(_tgs[_f_idx], _inv_logits[_f_idx], _en_logits[_f_idx], inputs[_f_idx].cpu().detach().numpy(),
+                                           rationale[_f_idx].cpu().detach().numpy())
                 g_loss = g_loss / n_train if n_train > 0 else 'not_available'
                 inv_loss = inv_loss / n_train if n_train > 0 else 'not_available'
                 enable_loss = enable_loss / n_train if n_train > 0 else 'not_available'
                 inv_acc = inv_n_correct / n_train if n_train > 0 else 'not_available'
                 enable_acc = enable_n_correct / n_train if n_train > 0 else 'not_available'
-                _log = {"g_loss": g_loss,
+                _log = {"rationale_has_nan": torch.any(torch.isnan(rationale))>0.5,
+                        "g_loss": g_loss,
+                        "sparsity_loss": sparsity_loss,
+                        "continuity_loss": continuity_loss,
                         "inv_loss": inv_loss,
                         "enable_loss": enable_loss,
                         "inv_acc": inv_acc,
@@ -180,7 +217,7 @@ class InvratTrainer:
             global_step = epoch * n_batch + i_batch if epoch else i_batch
             # do forward
             inputs = sample_batched['text'].to(self.device)
-            masks = (inputs > 0).to(inputs.dtype)
+            masks = sample_batched['mask'].to(self.device)
             targets = sample_batched['target'].to(self.device)
             envs = sample_batched['env'].to(self.device)
             rationale, env_inv_logits, env_enable_logits = self._step(inputs, masks, envs)
@@ -232,7 +269,7 @@ class InvratTrainer:
         for i_batch, sample_batched in enumerate(dataloader):
             # do forward
             inputs = sample_batched['text'].to(self.device)
-            masks = (inputs > 0).to(inputs.dtype)
+            masks = sample_batched['mask'].to(self.device)
             rationale, env_inv_logits, _ = self._step(inputs, masks, inv_only=True, not_use_rationale=False)
             # log sth necessary
             all_cid.extend(sample_batched['id'])
@@ -255,10 +292,18 @@ class InvratTrainer:
     def _independent_straight_through_sampling(rationale_logits, id_shape):
         assert rationale_logits.shape[-1] == 2, f"rationale_logits.shape should be f{(*id_shape, 2)} but got {rationale_logits.shape}"
         # rationale_logits (batch, seq_length, 2)
-        y_soft = torch.max(rationale_logits, dim=-1, keepdim=True)[0]
-        y_hard = (y_soft == rationale_logits).to(rationale_logits.dtype)
-        ret = y_hard - y_soft.detach() + y_soft
-        return ret[..., 1]
+        z = torch.softmax(rationale_logits, dim=-1)
+        z_hard = (z >= 0.5).type_as(z)
+        z_output = z + (z_hard - z).detach()
+        rationale = z_output[:, :, 1]
+        rationale[:, 0] = 1.0
+        return rationale
+        # y_soft = torch.max(rationale_logits, dim=-1, keepdim=True)[0]
+        # y_hard = (y_soft == rationale_logits).to(rationale_logits.dtype)
+        # ret = y_hard - y_soft.detach() + y_soft
+        # ret = ret[..., 1]
+        # ret[:, 0] = 1.0
+        # return ret
 
     def inv_rat_loss(self, env_inv_logits, env_enable_logits, targets):
         """

@@ -15,6 +15,7 @@ class BERT(nn.Module):
         self.dense = nn.Linear(768, configs['num_classes'])
         self.output_token_hidden = configs['output_token_hidden'] if 'output_token_hidden' in configs else False
         self.use_env = configs['use_env'] if 'use_env' in configs else False
+        self.use_extend_attention = configs['extend_attention'] if 'extend_attention' in configs else False
         if self.use_env:
             accumulator = configs['accumulator']
             self.env_model = multienv(768, accumulator)
@@ -24,17 +25,20 @@ class BERT(nn.Module):
             raise RuntimeWarning("build a env-enable model, but get no env input")
         if not self.use_env and env is not None:
             raise RuntimeError("build a env-free model, but get env input")
-        if mask is not None:
-            mask = mask * torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
-        else:
+        if mask is None:
             mask = torch.where(text > 0, torch.ones_like(text), torch.zeros_like(text))
         # hack huggingface/BertModel to add token_embedding with env_embedding
-        embedding_output = self.embeddings(text)
+        embedding_output = self.embeddings(text) * mask.unsqueeze(-1)
+        # print(f"emb.shape: {embedding_output.shape}")
+        # print(f"mask.shape : {mask.shape}")
         if self.use_env and env is not None:
             env_embeddings = self.env_model(env)
             env_embeddings = env_embeddings.unsqueeze(dim=1).expand_as(embedding_output)
             embedding_output += env_embeddings
-        extended_attention_mask = get_extended_attention_mask(mask)
+        if self.use_extend_attention:
+            extended_attention_mask = get_extended_attention_mask(mask)
+        else:
+            extended_attention_mask = mask
         head_mask = [None] * self.num_hidden_layers
         encoder_outputs = self.encoder(embedding_output, extended_attention_mask, head_mask)
         sequence_output = encoder_outputs[0]

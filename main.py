@@ -21,7 +21,8 @@ def bert_backbone_config(name):
     backbone = AutoModel.from_pretrained(name)
     arch = str(name).split('-')[0]
     if arch in ['bert', 'roberta', "distilroberta"]:
-        return {'embeddings': backbone.embeddings, 'encoder': backbone.encoder, 'num_hidden_layers': backbone.config.num_hidden_layers}
+        return {'embeddings': backbone.embeddings, 'encoder': backbone.encoder, 'num_hidden_layers': backbone.config.num_hidden_layers,
+                'extend_attention': True}
     if arch in ["distilbert"]:
         return {'embeddings': backbone.embeddings, 'encoder': backbone.transformer, 'num_hidden_layers': backbone.config.num_hidden_layers}
     else:
@@ -37,8 +38,9 @@ class Instructor:
         self.logger.addHandler(logging.StreamHandler(sys.stdout))
         self.logger.addHandler(logging.FileHandler(os.path.join('logs', args.log_name)))
         self._print_args()
-        dataloaders = load_data(batch_size=args.batch_size, bert_name=args.bert_name)
+        dataloaders = load_data(args=args, batch_size=args.batch_size, bert_name=args.bert_name)
         self.train_dataloader, self.dev_dataloader, self.test_dataloader, self.tokenizer, embedding_matrix = dataloaders
+        args.tokenizer = self.tokenizer
         self.logger.info('=> creating model')
         writer = None
         if args.do_invrat:
@@ -64,6 +66,8 @@ class Instructor:
                 configs.update(bert_backbone_config(args.bert_name))
             model = args.model_class(configs)
             self.trainer = DefaultTrainer(model, writer, args)
+        if args.from_ckpt:
+            self.trainer.load_state_dict(torch.load(args.from_ckpt))
         self.trainer.to(args.device)
         if args.device.type == 'cuda':
             self.logger.info(f"=> cuda memory allocated: {torch.cuda.memory_allocated(self.args.device.index)}")
@@ -94,7 +98,7 @@ class Instructor:
         else:
             val_loss, val_acc, all_cid, all_pred, _ = self.trainer.evaluate(dataloader, max_steps)
             ''' bias auc may be nan when a subgroup is empty '''
-            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred), np.array(all_cid))
+            overall_auc, bias_auc, final_score = evaluate(np.array(all_pred), np.array(all_cid), dev_json=args.dev_json)
             return val_loss, val_acc, overall_auc, bias_auc, final_score
 
     def evaluate_and_update(self, global_step, max_steps):
@@ -120,6 +124,10 @@ if __name__ == '__main__':
 
     model_classes = {'textcnn': textcnn, 'textrnn': textrnn, 'restext': restext, 'bert': bert}
     parser = argparse.ArgumentParser(description='Trainer', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    ''' dataset '''
+    parser.add_argument('--train_json', type=str, default='train.json')
+    parser.add_argument('--dev_json', type=str, default='dev.json')
+    parser.add_argument('--test_json', type=str, default='test.json')
     ''' model '''
     parser.add_argument('--model_name', type=str, default='textcnn', choices=model_classes.keys(), help='Classifier model architecture.')
     parser.add_argument('--bert_name', type=str, default=None, help='Bert name.')
@@ -145,6 +153,7 @@ if __name__ == '__main__':
     parser.add_argument('--continuity_lambda', type=float, default=2, help='the penalty coefficient for rationale continuity loss')
     parser.add_argument('--diff_lambda', type=float, default=10, help='the penalty coefficient for env_inv and env_enable model diff loss')
     parser.add_argument('--weight_sharing', default=False, action='store_true', help='sharing bert weight among models')
+    parser.add_argument('--from_ckpt', type=str)
 
     args = parser.parse_args()
     args.model_class = model_classes[args.model_name]
