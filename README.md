@@ -29,6 +29,12 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Split data
+
+```sh
+python data/split_data.py
+```
+
 ### Training
 
 ```sh
